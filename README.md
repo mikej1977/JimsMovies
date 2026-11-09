@@ -3,7 +3,7 @@ Jim's Movies for Project Zomboid 42.21+
 
 # Jim's Movie Maker
 
-Turns an mp4 (or anything ffmpeg can read) into a movie add-on for Jim's Movie Theater.
+Turns an mp4 (or anything ffmpeg can read) into a complete movie add-on for Jim's Movie Theater.
 
 ## What you need
 
@@ -15,7 +15,7 @@ Turns an mp4 (or anything ffmpeg can read) into a movie add-on for Jim's Movie T
 
 ### 1. Drag and drop (easiest)
 
-Put `movie.mp4` in a folder, and `movie-trailer.mp4` next to it if you have one (`<name>-trailer` and `movie-trailer` both get picked up). Drag the movie onto `Make-JimsMovie.bat`. It asks for the name, genre, size, audio and audio boosts, and makes the add-on in that folder.
+Put `<name>.mp4` in a folder, and `<name>-trailer.mp4` next to it if you have one (`<name>-trailer` and `movie-trailer` both get picked up). Drag the movie onto `Make-JimsMovie.bat`. It asks for the name, genre, size, audio and audio boosts, and makes the add-on in that folder.
 
 - **Forgot the trailer?** Drag the trailer onto the bat by itself. It offers to add it to the `JimsMovies_<Id>` add-on in that folder, matches that add-on's size and audio, and asks before replacing a trailer that's already there.
 - Anything after the video goes straight to the script:
@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Make-JimsMovie.ps1 -Video "D
 4. Make-MovieColors makes the screen glow colors
 5. it all gets laid out as a mod called `JimsMovies_<Id>` with `42/mod.info`, the registration lua, `_Colors.lua`, sound scripts, oggs, bk2s and the name translations
 
-Enable the add-on along with Jim's Movie Theater. Keep it in your local `Zomboid\mods`, not on the workshop.
+Enable the add-on along with Jim's Movie Theater. Keep it in your local `Zomboid\mods`, not on the workshop. You are responsible for making sure you abide by the laws in your country in regards to copyright, public domain, etc. 
 
 ## Make-JimsMovie.ps1 flags
 
