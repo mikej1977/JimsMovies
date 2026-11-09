@@ -11,7 +11,7 @@ Turns an mp4 (or anything ffmpeg can read) into a complete movie add-on for Jim'
 
 **These tools were made for Windows since RAD Video Tools is a Windows only program**
 
-- **ffmpeg** On your PATH, or point the tool at it.
+- **ffmpeg** On your PATH, or point the tool at it. If you need to install ffmpeg, you can open a command prompt and type `winget install -e --id Gyan.FFmpeg` 
 - **RAD Video Tools** for Windows, free from https://www.radgametools.com/bnkdown.htm. It's the only thing that encodes Bink 2. The tool looks on PATH, then `Program Files (x86)\RADVideo` and `Program Files\RADVideo`, and asks you where it is if it can't find it.
 - Windows only.
 
