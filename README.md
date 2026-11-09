@@ -3,6 +3,8 @@ Jim's Movies for Project Zomboid 42.21+
 
 # Jim's Movie Maker
 
+## The Movie Maker tools were barfed out by Gemmy and are provided as a courtesy. If you aren't comfortable reading or running random power shell scripts you found on the internet, then don't run it.
+
 Turns an mp4 (or anything ffmpeg can read) into a complete movie add-on for Jim's Movie Theater.
 
 ## What you need
