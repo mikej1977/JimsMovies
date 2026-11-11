@@ -493,7 +493,9 @@ name=Jim's Movie Theater: $Name
 id=$modId
 description=Movie add-on for Jim's Movie Theater.
 require=JimsMovies
+icon=jbm-addon-icon.png
 "@
+    Copy-Item (Join-Path $PSScriptRoot "jbm-addon-icon.png") (Join-Path $modDir "42\jbm-addon-icon.png") -Force
     }
 
     $videoLines = "video = `"$fileBase.bk2`","
