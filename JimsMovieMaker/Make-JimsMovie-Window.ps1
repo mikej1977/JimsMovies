@@ -37,7 +37,6 @@ function Save-LastFolder($path) {
 }
 
 $makerScript = Join-Path $PSScriptRoot "Make-JimsMovie.ps1"
-$captionsScript = Join-Path $PSScriptRoot "Make-JimsCaptions.ps1"
 $radPathFile = Join-Path $settingsDir "rad-path.txt"
 $ffmpegPathFile = Join-Path $settingsDir "ffmpeg-path.txt"
 
@@ -94,7 +93,7 @@ function Format-Argument($value) {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Jim's Movie Maker"
-$form.ClientSize = New-Object System.Drawing.Size(560, 594)
+$form.ClientSize = New-Object System.Drawing.Size(560, 810)
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 $form.StartPosition = "CenterScreen"
@@ -249,40 +248,72 @@ $audioTrackBox.DropDownWidth = 360
 $audioTrackBox.Enabled = $false
 $soundGroup.Controls.Add($audioTrackBox)
 
-# captions, made from the movie's own subtitles or a subtitle file once the movie's done
-$captionsCheck = New-Object System.Windows.Forms.CheckBox
-$captionsCheck.Text = "Captions"
-$captionsCheck.Location = New-Object System.Drawing.Point(16, 402)
-$captionsCheck.Size = New-Object System.Drawing.Size(110, 24)
-$form.Controls.Add($captionsCheck)
-$captionsBox = New-Object System.Windows.Forms.ComboBox
-$captionsBox.DropDownStyle = "DropDownList"
-$captionsBox.Location = New-Object System.Drawing.Point(130, 402)
-$captionsBox.Size = New-Object System.Drawing.Size(270, 24)
-$captionsBox.DropDownWidth = 420
-$form.Controls.Add($captionsBox)
-Add-Label "Language" 408 402 60 | Out-Null
-$captionLanguageBox = Add-TextBox 470 402 74
-$captionLanguageBox.CharacterCasing = "Upper"
-$captionLanguageBox.Text = "EN"
+# what to do with subtitles first. burning in takes one from the From list, caption tracks get checked in a list
+$subtitlesGroup = New-Object System.Windows.Forms.GroupBox
+$subtitlesGroup.Text = "Subtitles"
+$subtitlesGroup.Location = New-Object System.Drawing.Point(16, 396)
+$subtitlesGroup.Size = New-Object System.Drawing.Size(528, 136)
+$form.Controls.Add($subtitlesGroup)
+
+function New-GroupRadio($group, $text, $x, $y, $width) {
+    $radio = New-Object System.Windows.Forms.RadioButton
+    $radio.Text = $text
+    $radio.Location = New-Object System.Drawing.Point($x, $y)
+    $radio.Size = New-Object System.Drawing.Size($width, 22)
+    $group.Controls.Add($radio)
+    return $radio
+}
+
+$noSubtitlesRadio = New-GroupRadio $subtitlesGroup "None" 14 22 100
+$noSubtitlesRadio.Checked = $true
+$burnRadio = New-GroupRadio $subtitlesGroup "Burn into the video" 120 22 160
+$captionTracksRadio = New-GroupRadio $subtitlesGroup "Caption tracks" 300 22 200
+
+$subtitlesFromBox = New-Object System.Windows.Forms.ComboBox
+$subtitlesFromBox.DropDownStyle = "DropDownList"
+$subtitlesFromBox.Location = New-Object System.Drawing.Point(14, 50)
+$subtitlesFromBox.Size = New-Object System.Drawing.Size(404, 24)
+$subtitlesFromBox.DropDownWidth = 480
+$subtitlesGroup.Controls.Add($subtitlesFromBox)
+
+$captionsList = New-Object System.Windows.Forms.CheckedListBox
+$captionsList.Location = New-Object System.Drawing.Point(14, 50)
+$captionsList.Size = New-Object System.Drawing.Size(404, 76)
+$captionsList.CheckOnClick = $true
+$captionsList.IntegralHeight = $false
+$subtitlesGroup.Controls.Add($captionsList)
+
+$subtitlesBrowse = Add-Button "Browse..." 430 50 84 $subtitlesGroup
+
+# other audio tracks players can switch to, every track but the one the movie plays
+$otherAudioGroup = New-Object System.Windows.Forms.GroupBox
+$otherAudioGroup.Text = "Other audio players can switch to"
+$otherAudioGroup.Location = New-Object System.Drawing.Point(16, 540)
+$otherAudioGroup.Size = New-Object System.Drawing.Size(528, 112)
+$form.Controls.Add($otherAudioGroup)
+$otherAudioList = New-Object System.Windows.Forms.CheckedListBox
+$otherAudioList.Location = New-Object System.Drawing.Point(14, 22)
+$otherAudioList.Size = New-Object System.Drawing.Size(500, 80)
+$otherAudioList.CheckOnClick = $true
+$otherAudioList.IntegralHeight = $false
+$otherAudioGroup.Controls.Add($otherAudioList)
 
 # where it goes
-Add-Label "Make it in" 16 436 | Out-Null
-$outputBox = Add-TextBox 130 436 320
-$outputBrowse = Add-Button "Browse..." 460 436
+Add-Label "Make it in" 16 662 | Out-Null
+$outputBox = Add-TextBox 130 662 320
+$outputBrowse = Add-Button "Browse..." 460 662
 
 $progress = New-Object System.Windows.Forms.ProgressBar
 $progress.Style = "Marquee"
 $progress.MarqueeAnimationSpeed = 0
-$progress.Location = New-Object System.Drawing.Point(16, 484)
+$progress.Location = New-Object System.Drawing.Point(16, 702)
 $progress.Size = New-Object System.Drawing.Size(528, 18)
 $form.Controls.Add($progress)
-$status = Add-Label "Pick a movie to start" 16 506 528
+$status = Add-Label "Pick a movie to start" 16 724 528
 $status.ForeColor = [System.Drawing.Color]::DimGray
 
-$captionsButton = Add-Button "Add Captions to an Add-on..." 16 550 200
-$makeButton = Add-Button "Make Movie" 344 550 110
-$closeButton = Add-Button "Close" 464 550 80
+$makeButton = Add-Button "Make Movie" 344 766 110
+$closeButton = Add-Button "Close" 464 766 80
 $form.AcceptButton = $makeButton
 $form.CancelButton = $closeButton
 
@@ -291,6 +322,7 @@ function Update-Trailer {
     $trailerBrowse.Enabled = $trailerCheck.Checked
     $trailerBoost.Enabled = $trailerCheck.Checked
 }
+
 
 # ffprobe without asking for it, for filling in lists when a movie gets picked
 function Find-Ffprobe {
@@ -304,88 +336,141 @@ function Find-Ffprobe {
     return $null
 }
 
-# Path, Track, Label, Usable and Language for each subtitle track in a file, labels from Make-JimsCaptions.ps1
+$IMAGE_SUBTITLE_CODECS = @("hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub", "dvb_teletext")
+
+# Path, Track, Label and Usable for each subtitle track in a file
 function Get-SubtitleChoices($path, $labelStart) {
-    $ffmpeg = Find-Ffmpeg
     $ffprobe = Find-Ffprobe
-    if (-not $ffmpeg -or -not $ffprobe -or -not (Test-Path -LiteralPath $captionsScript)) { return }
-    $count = @(& $ffprobe -v error -select_streams s -show_entries stream=index -of csv=p=0 $path | Where-Object { $_ }).Count
-    if ($count -eq 0) { return }
-    $ErrorActionPreference = "Continue"
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $captionsScript -Subtitles $path -ListTracks -Ffmpeg $ffmpeg -Ffprobe $ffprobe 2>&1
-    if ($LASTEXITCODE -ne 0) { return }
-    # powershell 5 hands back the json array as one thing, the ForEach unrolls it
-    $tracks = @((@($output | ForEach-Object { "$_" }) -join "") | ConvertFrom-Json | ForEach-Object { $_ })
+    if (-not $ffprobe) { return }
+    $probe = (& $ffprobe -v error -select_streams s -show_entries "stream=codec_name:stream_tags=language,title:stream_disposition=forced" -of json $path) -join "`n" | ConvertFrom-Json
+    $tracks = @($probe.streams | Where-Object { $_ })
     for ($i = 0; $i -lt $tracks.Count; $i++) {
-        $label = if ($tracks.Count -eq 1 -and $labelStart -ne "From the movie") { $labelStart } else { "${labelStart}: $($tracks[$i].Label)" }
-        [pscustomobject]@{ Path = $path; Track = $i + 1; Label = $label; Usable = $tracks[$i].Usable; Language = $tracks[$i].Language }
+        $stream = $tracks[$i]
+        $usable = $IMAGE_SUBTITLE_CODECS -notcontains $stream.codec_name
+        $parts = @()
+        $parts += if ($stream.tags -and $stream.tags.language) { $stream.tags.language } else { "unknown language" }
+        if ($stream.tags -and $stream.tags.title) { $parts += $stream.tags.title }
+        if ($stream.disposition -and $stream.disposition.forced -eq 1) { $parts += "forced, only the foreign bits" }
+        $parts += if ($usable) { $stream.codec_name } else { "picture subtitles, can't use" }
+        $label = if ($tracks.Count -eq 1 -and $labelStart -ne "From the movie") { $labelStart } else { "${labelStart}: $($parts -join ', ')" }
+        [pscustomobject]@{ Path = $path; Track = $i + 1; Label = $label; Usable = $usable }
     }
 }
 
-$PICK_SUBTITLE_FILE = "Pick a subtitle file..."
-$captionChoices = @()
-$lastCaptionIndex = -1
+# every subtitle track found so far, the movie's own and any files next to it or picked
+$subtitleChoices = @()
 
-function Update-CaptionsRow {
-    $captionsBox.Enabled = $captionsCheck.Checked
-    $captionLanguageBox.Enabled = $captionsCheck.Checked
+function Get-ChoiceKey($choice) { return "$($choice.Track)*$($choice.Path)" }
+
+# fills both lists from the choices, keeping what was checked or picked by its file and track
+function Update-SubtitleLists($checkKeys, $selectKey) {
+    if ($null -eq $checkKeys) {
+        $checkKeys = @()
+        for ($i = 0; $i -lt $captionsList.Items.Count; $i++) {
+            if ($captionsList.GetItemChecked($i) -and $i -lt $subtitleChoices.Count) { $checkKeys += Get-ChoiceKey $subtitleChoices[$i] }
+        }
+    }
+    if (-not $selectKey -and $subtitlesFromBox.SelectedIndex -ge 0 -and $subtitlesFromBox.SelectedIndex -lt $subtitleChoices.Count) {
+        $selectKey = Get-ChoiceKey $subtitleChoices[$subtitlesFromBox.SelectedIndex]
+    }
+    $captionsList.Items.Clear()
+    $subtitlesFromBox.Items.Clear()
+    $select = 0
+    for ($i = 0; $i -lt $subtitleChoices.Count; $i++) {
+        $choice = $subtitleChoices[$i]
+        $key = Get-ChoiceKey $choice
+        [void]$captionsList.Items.Add($choice.Label, ($choice.Usable -and $checkKeys -contains $key))
+        [void]$subtitlesFromBox.Items.Add($choice.Label)
+        if ($key -eq $selectKey) { $select = $i }
+    }
+    if ($subtitleChoices.Count -gt 0) { $subtitlesFromBox.SelectedIndex = $select }
+    Update-SubtitlesMode
 }
 
-function Set-CaptionChoices($choices) {
-    $script:captionChoices = @($choices)
-    $captionsBox.Items.Clear()
-    foreach ($choice in $script:captionChoices) { [void]$captionsBox.Items.Add($choice.Label) }
-    [void]$captionsBox.Items.Add($PICK_SUBTITLE_FILE)
+# burning in shows From, caption tracks show the checklist, None greys out whichever is showing
+function Update-SubtitlesMode {
+    $subtitlesFromBox.Visible = -not $captionTracksRadio.Checked
+    $captionsList.Visible = $captionTracksRadio.Checked
+    $subtitlesFromBox.Enabled = $burnRadio.Checked
+    $captionsList.Enabled = $captionTracksRadio.Checked
+    $subtitlesBrowse.Enabled = -not $noSubtitlesRadio.Checked
 }
 
 # the movie's own subtitle tracks, plus subtitle files named like the movie next to it
-function Update-CaptionChoices($path) {
+function Update-SubtitleChoices($path) {
     $folder = Split-Path -Parent $path
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($path)
     $choices = @(Get-SubtitleChoices $path "From the movie")
     foreach ($file in Get-ChildItem -LiteralPath $folder -File -Filter "$baseName*" -ErrorAction SilentlyContinue) {
         if (@(".srt", ".ass", ".ssa", ".vtt") -contains $file.Extension.ToLower()) { $choices += @(Get-SubtitleChoices $file.FullName $file.Name) }
     }
-    Set-CaptionChoices $choices
-    $script:lastCaptionIndex = -1
-    if ($choices.Count -gt 0) {
-        $captionsBox.SelectedIndex = 0
-        $captionsCheck.Checked = $true
-    }
-    else {
-        $captionsCheck.Checked = $false
-    }
-    Update-CaptionsRow
+    $script:subtitleChoices = $choices
+    # starts with the first usable track checked, the rest are a click away
+    $first = @($choices | Where-Object { $_.Usable } | Select-Object -First 1)
+    if ($first.Count -gt 0) { $captionTracksRadio.Checked = $true } else { $noSubtitlesRadio.Checked = $true }
+    Update-SubtitleLists @($first | ForEach-Object { Get-ChoiceKey $_ }) $null
 }
 
-$captionsBox.Add_SelectedIndexChanged({
-    $index = $captionsBox.SelectedIndex
-    if ($index -lt 0) { return }
-    if ($index -lt $captionChoices.Count) {
-        $script:lastCaptionIndex = $index
-        $captionLanguageBox.Text = $captionChoices[$index].Language
-        return
+# a file that's already listed, the movie itself say, just gets picked instead of its tracks going in twice
+function Add-SubtitleFile($path) {
+    $already = @($subtitleChoices | Where-Object { $_.Path -eq $path })
+    $added = @()
+    if ($already.Count -eq 0) {
+        $added = @(Get-SubtitleChoices $path ([System.IO.Path]::GetFileName($path)))
+        if ($added.Count -eq 0) { Show-Problem "No subtitles in $([System.IO.Path]::GetFileName($path))."; return }
+        $script:subtitleChoices = @($subtitleChoices) + $added
     }
+    if ($noSubtitlesRadio.Checked) { $captionTracksRadio.Checked = $true }
+    $fileChoices = if ($added.Count -gt 0) { $added } else { $already }
+    $checkKeys = @()
+    for ($i = 0; $i -lt $captionsList.Items.Count; $i++) {
+        if ($captionsList.GetItemChecked($i)) { $checkKeys += Get-ChoiceKey $subtitleChoices[$i] }
+    }
+    # a newly browsed file gets its tracks checked, that's why it got picked
+    $checkKeys += @($fileChoices | Where-Object { $_.Usable } | ForEach-Object { Get-ChoiceKey $_ })
+    Update-SubtitleLists $checkKeys (Get-ChoiceKey $fileChoices[0])
+}
+
+$subtitlesBrowse.Add_Click({
     $picker = New-Object System.Windows.Forms.OpenFileDialog
-    $picker.Title = "Pick the subtitles"
+    $picker.Title = "Pick the subtitles, or a video with subtitles in it"
     $picker.Filter = "Subtitles and videos (*.srt;*.ass;*.ssa;*.vtt;*.mkv;*.mp4;*.mov;*.webm;*.m4v)|*.srt;*.ass;*.ssa;*.vtt;*.mkv;*.mp4;*.mov;*.webm;*.m4v|All files (*.*)|*.*"
     if ($lastFolder) { $picker.InitialDirectory = $lastFolder }
-    $added = @()
-    if ($picker.ShowDialog($form) -eq "OK") {
-        $added = @(Get-SubtitleChoices $picker.FileName ([System.IO.Path]::GetFileName($picker.FileName)))
-        if ($added.Count -eq 0) { Show-Problem "No text subtitles in $([System.IO.Path]::GetFileName($picker.FileName))." }
-    }
-    if ($added.Count -gt 0) {
-        $firstNew = $captionChoices.Count
-        Set-CaptionChoices ($captionChoices + $added)
-        $captionsBox.SelectedIndex = $firstNew
-    }
-    else {
-        $captionsBox.SelectedIndex = $lastCaptionIndex
+    if ($picker.ShowDialog($form) -eq "OK") { Add-SubtitleFile $picker.FileName }
+})
+
+# picture subtitles can't be made into anything, so they won't take a check
+$captionsList.Add_ItemCheck({
+    param($list, $check)
+    if ($check.NewValue -eq "Checked" -and $check.Index -lt $subtitleChoices.Count -and -not $subtitleChoices[$check.Index].Usable) {
+        $check.NewValue = "Unchecked"
     }
 })
 
-$captionsCheck.Add_CheckedChanged({ Update-CaptionsRow })
+foreach ($radio in @($noSubtitlesRadio, $burnRadio, $captionTracksRadio)) {
+    $radio.Add_CheckedChanged({ if ($this.Checked) { Update-SubtitlesMode } })
+}
+
+# track numbers behind the other audio list, every track but the one the movie plays
+$otherAudioTracks = @()
+
+# keeps the same tracks checked when the movie's own track changes
+function Update-OtherAudioTracks {
+    $checked = @()
+    for ($i = 0; $i -lt $otherAudioList.Items.Count; $i++) {
+        if ($otherAudioList.GetItemChecked($i) -and $i -lt $otherAudioTracks.Count) { $checked += $otherAudioTracks[$i] }
+    }
+    $script:otherAudioTracks = @()
+    $otherAudioList.Items.Clear()
+    for ($i = 0; $i -lt $audioTrackBox.Items.Count; $i++) {
+        if ($i -eq $audioTrackBox.SelectedIndex) { continue }
+        $script:otherAudioTracks += $i + 1
+        [void]$otherAudioList.Items.Add($audioTrackBox.Items[$i], ($checked -contains ($i + 1)))
+    }
+    $otherAudioGroup.Enabled = $otherAudioList.Items.Count -gt 0
+}
+
+$audioTrackBox.Add_SelectedIndexChanged({ Update-OtherAudioTracks })
 
 # fills the audio track list, only worth picking when there's more than one
 function Update-AudioTracks($path) {
@@ -404,6 +489,10 @@ function Update-AudioTracks($path) {
     }
     if ($audioTrackBox.Items.Count -gt 0) { $audioTrackBox.SelectedIndex = 0 }
     $audioTrackBox.Enabled = $audioTrackBox.Items.Count -gt 1
+
+    $otherAudioList.Items.Clear()
+    $script:otherAudioTracks = @()
+    Update-OtherAudioTracks
 }
 
 # same rule as the bat: <name>-trailer next to the movie, or movie-trailer
@@ -412,7 +501,7 @@ function Set-Movie($path) {
     $status.Text = "Looking at the movie..."
     $form.Refresh()
     Update-AudioTracks $path
-    Update-CaptionChoices $path
+    Update-SubtitleChoices $path
     $folder = Split-Path -Parent $path
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($path)
     if (-not $nameBox.Text) { $nameBox.Text = $baseName }
@@ -507,11 +596,17 @@ $makeButton.Add_Click({
     if ($trailerCheck.Checked -and -not (Test-Path -LiteralPath $trailer)) { Show-Problem "Can't find the trailer, pick it again or untick Trailer."; return }
     $output = $outputBox.Text.Trim()
     if (-not $output -or -not (Test-Path -LiteralPath $output)) { Show-Problem "Pick where the add-on should go."; return }
-    if ($captionsCheck.Checked) {
-        $index = $captionsBox.SelectedIndex
-        if ($index -lt 0 -or $index -ge $captionChoices.Count) { Show-Problem "Pick the subtitles for the captions, or untick Captions."; return }
-        if (-not $captionChoices[$index].Usable) { Show-Problem "Those are picture subtitles, not text. Turn them into an srt with Subtitle Edit's OCR first, or untick Captions."; return }
-        if ($captionLanguageBox.Text.Trim() -notmatch '^[A-Z]{2,4}$') { Show-Problem "The captions language should be a game language code like EN or PTBR."; return }
+    if ($burnRadio.Checked) {
+        $index = $subtitlesFromBox.SelectedIndex
+        if ($index -lt 0 -or $index -ge $subtitleChoices.Count) { Show-Problem "Pick the subtitles to burn in, or set Subtitles to None."; return }
+        if (-not $subtitleChoices[$index].Usable) { Show-Problem "Those are picture subtitles, not text. Turn them into an srt with Subtitle Edit's OCR first, or set Subtitles to None."; return }
+    }
+    $captionPicks = @()
+    if ($captionTracksRadio.Checked) {
+        for ($i = 0; $i -lt $captionsList.Items.Count; $i++) {
+            if ($captionsList.GetItemChecked($i)) { $captionPicks += Get-ChoiceKey $subtitleChoices[$i] }
+        }
+        if ($captionPicks.Count -eq 0) { Show-Problem "Check at least one caption track, or set Subtitles to None."; return }
     }
     if (-not (Test-Path -LiteralPath $makerScript)) { Show-Problem "Make-JimsMovie.ps1 needs to be next to this script."; return }
 
@@ -546,10 +641,16 @@ $makeButton.Add_Click({
     )
     if ($monoRadio.Checked) { $arguments += "-Mono" }
     if ($audioTrackBox.Enabled) { $arguments += @("-AudioTrack", ($audioTrackBox.SelectedIndex + 1)) }
-    if ($captionsCheck.Checked) {
-        $caption = $captionChoices[$captionsBox.SelectedIndex]
-        $arguments += @("-Captions", (Format-Argument $caption.Path), "-CaptionTrack", $caption.Track, "-CaptionLanguage", $captionLanguageBox.Text.Trim())
+    $audioPicks = @()
+    for ($i = 0; $i -lt $otherAudioList.Items.Count; $i++) {
+        if ($otherAudioList.GetItemChecked($i)) { $audioPicks += $otherAudioTracks[$i] }
     }
+    if ($audioPicks.Count -gt 0) { $arguments += @("-AudioTracks", ($audioPicks -join ",")) }
+    if ($burnRadio.Checked) {
+        $subtitle = $subtitleChoices[$subtitlesFromBox.SelectedIndex]
+        $arguments += @("-BurnSubtitles", (Format-Argument $subtitle.Path), "-BurnTrack", $subtitle.Track)
+    }
+    elseif ($captionPicks.Count -gt 0) { $arguments += @("-CaptionPicks", (Format-Argument ($captionPicks -join "|"))) }
     if ($genreBox.SelectedIndex -gt 0) { $arguments += @("-Genre", ($genreBox.SelectedItem -replace '[^A-Za-z]', '').ToLower()) }
     if ($trailerCheck.Checked) {
         $arguments += @("-TrailerFile", (Format-Argument $trailer), "-TrailerAudioGain", ([double]$trailerBoost.Value).ToString($culture))
@@ -562,224 +663,40 @@ $makeButton.Add_Click({
     $watchTimer.Start()
 })
 
-$SUBTITLE_FILTER = "Subtitles and videos (*.srt;*.ass;*.ssa;*.vtt;*.mkv;*.mp4;*.mov;*.webm;*.m4v)|*.srt;*.ass;*.ssa;*.vtt;*.mkv;*.mp4;*.mov;*.webm;*.m4v|All files (*.*)|*.*"
+$toolTip = New-Object System.Windows.Forms.ToolTip
+$toolTip.AutoPopDelay = 20000
+$toolTip.InitialDelay = 400
 
-function Find-MovieAddOns($folder) {
-    if (-not $folder -or -not (Test-Path -LiteralPath $folder)) { return @() }
-    foreach ($dir in Get-ChildItem -LiteralPath $folder -Directory -Filter "JimsMovies_*") {
-        $addOnId = $dir.Name.Substring("JimsMovies_".Length)
-        $registration = Join-Path $dir.FullName "42\media\lua\shared\$($dir.Name)\JimsMovies$addOnId.lua"
-        if (Test-Path -LiteralPath $registration) { $dir.FullName }
-    }
+# number boxes have a text box inside them that eats the hover, so the tip goes on those too
+function Set-Tip($control, $text) {
+    $toolTip.SetToolTip($control, $text)
+    foreach ($child in $control.Controls) { $toolTip.SetToolTip($child, $text) }
 }
 
-# "Full Metal Jacket (JimsMovies_FullMetalJacket)", the movie name comes out of the add-on's translation file
-function Get-AddOnLabel($dir) {
-    $folderName = Split-Path -Leaf $dir
-    $addOnId = $folderName.Substring("JimsMovies_".Length)
-    $translation = Join-Path $dir "common\media\lua\shared\Translate\EN\IG_UI.json"
-    if (Test-Path -LiteralPath $translation) {
-        try {
-            $movieName = (Get-Content -LiteralPath $translation -Raw -Encoding UTF8 | ConvertFrom-Json)."IGUI_JimsMovies${addOnId}_Name"
-            if ($movieName) { return "$movieName ($folderName)" }
-        }
-        catch { }
-    }
-    return $folderName
+Set-Tip $movieBox "The movie file. mp4, mkv, mov, avi, webm or m4v"
+Set-Tip $trailerCheck "Makes a trailer too, it plays before the movie.`nName it <movie>-trailer next to the movie and it gets found on its own"
+Set-Tip $nameBox "What the movie's called in the Start Movie list.`nThe add-on's code name is this with the spaces and symbols taken out"
+Set-Tip $genreBox "Which moodles the movie helps with.`nNone gives the default mix"
+foreach ($radio in $sizeButtons) {
+    Set-Tip $radio "How big the picture is. Bigger looks sharper on the big screens`nbut takes a lot longer to make and makes a bigger add-on.`n240p is plenty for TVs"
 }
-
-function Show-CaptionsWindow {
-    $dialog = New-Object System.Windows.Forms.Form
-    $dialog.Text = "Jim's Movie Maker: Add Captions to an Add-on"
-    $dialog.ClientSize = New-Object System.Drawing.Size(560, 330)
-    $dialog.FormBorderStyle = "FixedDialog"
-    $dialog.MaximizeBox = $false
-    $dialog.MinimizeBox = $false
-    $dialog.StartPosition = "CenterParent"
-    $dialog.Font = $form.Font
-
-    Add-Label "Subtitles" 16 16 110 $dialog | Out-Null
-    $subtitlesBox = Add-TextBox 130 16 320 $dialog
-    $subtitlesBox.ReadOnly = $true
-    $subtitlesBrowse = Add-Button "Browse..." 460 16 80 $dialog
-
-    Add-Label "Track" 16 50 110 $dialog | Out-Null
-    $trackBox = New-Object System.Windows.Forms.ComboBox
-    $trackBox.DropDownStyle = "DropDownList"
-    $trackBox.Location = New-Object System.Drawing.Point(130, 50)
-    $trackBox.Size = New-Object System.Drawing.Size(410, 24)
-    $dialog.Controls.Add($trackBox)
-
-    Add-Label "Movie add-on" 16 84 110 $dialog | Out-Null
-    $addOnBox = New-Object System.Windows.Forms.ComboBox
-    $addOnBox.DropDownStyle = "DropDownList"
-    $addOnBox.Location = New-Object System.Drawing.Point(130, 84)
-    $addOnBox.Size = New-Object System.Drawing.Size(320, 24)
-    $dialog.Controls.Add($addOnBox)
-    $addOnBrowse = Add-Button "Browse..." 460 84 80 $dialog
-
-    Add-Label "Language" 16 118 110 $dialog | Out-Null
-    $languageBox = Add-TextBox 130 118 60 $dialog
-    $languageBox.Text = "EN"
-    $languageBox.CharacterCasing = "Upper"
-    $languageHint = Add-Label "game language code, EN, ES, FR, DE, PTBR..." 200 118 340 $dialog
-    $languageHint.ForeColor = [System.Drawing.Color]::DimGray
-
-    Add-Label "Shift by" 16 152 110 $dialog | Out-Null
-    $offsetBox = New-Object System.Windows.Forms.NumericUpDown
-    $offsetBox.DecimalPlaces = 1
-    $offsetBox.Increment = 0.1
-    $offsetBox.Minimum = -3600
-    $offsetBox.Maximum = 3600
-    $offsetBox.Location = New-Object System.Drawing.Point(130, 152)
-    $offsetBox.Size = New-Object System.Drawing.Size(80, 24)
-    $dialog.Controls.Add($offsetBox)
-    $offsetHint = Add-Label "seconds, negative shows them sooner" 220 152 320 $dialog
-    $offsetHint.ForeColor = [System.Drawing.Color]::DimGray
-
-    Add-Label "Put them in" 16 186 110 $dialog | Out-Null
-    $inAddOnRadio = New-Object System.Windows.Forms.RadioButton
-    $inAddOnRadio.Text = "The movie add-on"
-    $inAddOnRadio.Location = New-Object System.Drawing.Point(130, 186)
-    $inAddOnRadio.Size = New-Object System.Drawing.Size(160, 24)
-    $inAddOnRadio.Checked = $true
-    $dialog.Controls.Add($inAddOnRadio)
-    $otherModRadio = New-Object System.Windows.Forms.RadioButton
-    $otherModRadio.Text = "Another mod folder, like a language pack"
-    $otherModRadio.Location = New-Object System.Drawing.Point(290, 186)
-    $otherModRadio.Size = New-Object System.Drawing.Size(260, 24)
-    $dialog.Controls.Add($otherModRadio)
-    $otherModBox = Add-TextBox 130 218 320 $dialog
-    $otherModBrowse = Add-Button "Browse..." 460 218 80 $dialog
-
-    $captionsStatus = Add-Label "Pick the subtitles, or a movie with subtitles in it" 16 256 528 $dialog
-    $captionsStatus.ForeColor = [System.Drawing.Color]::DimGray
-
-    $makeCaptionsButton = Add-Button "Make Captions" 344 290 110 $dialog
-    $closeCaptionsButton = Add-Button "Close" 464 290 80 $dialog
-    $closeCaptionsButton.DialogResult = "Cancel"
-    $dialog.AcceptButton = $makeCaptionsButton
-    $dialog.CancelButton = $closeCaptionsButton
-
-    # handlers can't assign back to this function's variables, but they can fill in a table
-    $state = @{ Tracks = @(); AddOnPaths = New-Object System.Collections.ArrayList }
-
-    $updateOtherMod = {
-        $otherModBox.Enabled = $otherModRadio.Checked
-        $otherModBrowse.Enabled = $otherModRadio.Checked
-    }
-    & $updateOtherMod
-    $otherModRadio.Add_CheckedChanged($updateOtherMod)
-
-    # never picks one on its own, captions in the wrong movie are worse than a click
-    $addAddOn = {
-        param($path, $select)
-        $index = $state.AddOnPaths.IndexOf($path)
-        if ($index -lt 0) {
-            $index = $state.AddOnPaths.Add($path)
-            [void]$addOnBox.Items.Add((Get-AddOnLabel $path))
-        }
-        if ($select) { $addOnBox.SelectedIndex = $index }
-    }
-
-    foreach ($path in @(Find-MovieAddOns (Join-Path $env:USERPROFILE "Zomboid\mods"))) { & $addAddOn $path $false }
-
-    $trackBox.Add_SelectedIndexChanged({
-        if ($trackBox.SelectedIndex -ge 0) { $languageBox.Text = $state.Tracks[$trackBox.SelectedIndex].Language }
-    })
-
-    $subtitlesBrowse.Add_Click({
-        $picker = New-Object System.Windows.Forms.OpenFileDialog
-        $picker.Title = "Pick the subtitles, or a movie with subtitles in it"
-        $picker.Filter = $SUBTITLE_FILTER
-        if ($lastFolder) { $picker.InitialDirectory = $lastFolder }
-        if ($picker.ShowDialog($dialog) -ne "OK") { return }
-        $tools = Get-FfmpegTools $dialog
-        if (-not $tools) { return }
-
-        $subtitlesBox.Text = $picker.FileName
-        $state.Tracks = @()
-        $trackBox.Items.Clear()
-        $captionsStatus.Text = "Looking for subtitles..."
-        $dialog.Refresh()
-
-        $ErrorActionPreference = "Continue"
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $captionsScript -Subtitles $picker.FileName -ListTracks -Ffmpeg $tools[0] -Ffprobe $tools[1] 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $captionsStatus.Text = "Couldn't read the subtitles"
-            Show-Problem ((@($output | ForEach-Object { "$_" }) -join "`n").Trim()) $dialog
-            return
-        }
-        # powershell 5 hands back the json array as one thing, the ForEach unrolls it
-        $found = @((@($output | ForEach-Object { "$_" }) -join "") | ConvertFrom-Json | ForEach-Object { $_ })
-        $state.Tracks = $found
-        foreach ($track in $found) { [void]$trackBox.Items.Add($track.Label) }
-        $trackBox.SelectedIndex = 0
-        $captionsStatus.Text = if ($found.Count -eq 1) { "Found 1 subtitle track" } else { "Found $($found.Count) subtitle tracks, pick one" }
-
-        foreach ($path in @(Find-MovieAddOns (Split-Path -Parent $picker.FileName))) { & $addAddOn $path $false }
-    })
-
-    $addOnBrowse.Add_Click({
-        $picker = New-Object System.Windows.Forms.FolderBrowserDialog
-        $picker.Description = "Pick the movie add-on folder, the JimsMovies_ one"
-        if ($addOnBox.SelectedIndex -ge 0) { $picker.SelectedPath = $state.AddOnPaths[$addOnBox.SelectedIndex] }
-        if ($picker.ShowDialog($dialog) -ne "OK") { return }
-        if (-not (Split-Path -Leaf $picker.SelectedPath).StartsWith("JimsMovies_")) { Show-Problem "That's not a movie add-on, it should be a folder named JimsMovies_ something." $dialog; return }
-        & $addAddOn $picker.SelectedPath $true
-    })
-
-    $otherModBrowse.Add_Click({
-        $picker = New-Object System.Windows.Forms.FolderBrowserDialog
-        $picker.Description = "Pick the mod folder the captions go in"
-        if ($otherModBox.Text) { $picker.SelectedPath = $otherModBox.Text }
-        if ($picker.ShowDialog($dialog) -eq "OK") { $otherModBox.Text = $picker.SelectedPath }
-    })
-
-    $makeCaptionsButton.Add_Click({
-        if (-not $subtitlesBox.Text -or $trackBox.SelectedIndex -lt 0) { Show-Problem "Pick the subtitles first." $dialog; return }
-        if (-not $state.Tracks[$trackBox.SelectedIndex].Usable) { Show-Problem "That track is picture subtitles, not text. Turn it into an srt with Subtitle Edit's OCR first, it's free." $dialog; return }
-        if ($addOnBox.SelectedIndex -lt 0) { Show-Problem "Pick the movie add-on these captions are for." $dialog; return }
-        $addOn = $state.AddOnPaths[$addOnBox.SelectedIndex]
-        $language = $languageBox.Text.Trim()
-        if ($language -notmatch '^[A-Z]{2,4}$') { Show-Problem "The language should be a game language code like EN or PTBR." $dialog; return }
-        $outDir = $addOn
-        if ($otherModRadio.Checked) {
-            $outDir = $otherModBox.Text.Trim()
-            if (-not $outDir) { Show-Problem "Pick the mod folder the captions go in." $dialog; return }
-        }
-        $tools = Get-FfmpegTools $dialog
-        if (-not $tools) { return }
-
-        $culture = [System.Globalization.CultureInfo]::InvariantCulture
-        $arguments = @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", (Format-Argument $captionsScript),
-            "-Subtitles", (Format-Argument $subtitlesBox.Text),
-            "-Track", ($trackBox.SelectedIndex + 1),
-            "-Id", (Split-Path -Leaf $addOn).Substring("JimsMovies_".Length),
-            "-ModsDir", (Format-Argument (Split-Path -Parent $addOn)),
-            "-OutDir", (Format-Argument $outDir),
-            "-Language", $language,
-            "-Offset", ([double]$offsetBox.Value).ToString($culture),
-            "-Ffmpeg", (Format-Argument $tools[0]),
-            "-Ffprobe", (Format-Argument $tools[1]),
-            "-Ask"
-        )
-        Start-Process -FilePath "powershell.exe" -ArgumentList ($arguments -join " ") | Out-Null
-        $captionsStatus.Text = "Making them in the other window"
-    })
-
-    [void]$dialog.ShowDialog($form)
-    $dialog.Dispose()
-}
-
-$captionsButton.Add_Click({
-    if (-not (Test-Path -LiteralPath $captionsScript)) { Show-Problem "Make-JimsCaptions.ps1 needs to be next to this script."; return }
-    Show-CaptionsWindow
-})
+Set-Tip $stereoRadio "Two channels"
+Set-Tip $monoRadio "One channel, half the memory"
+Set-Tip $rateBox "Sound quality. The game decodes the whole movie's sound into memory,`nso lower uses a lot less of it"
+Set-Tip $movieBoost "Makes the movie louder, in dB. For quiet sources, 6 to 18 say.`nNegative turns it down"
+Set-Tip $trailerBoost "Same thing for the trailer"
+Set-Tip $audioTrackBox "Which audio track to use when the movie has more than one, like another language or commentary"
+Set-Tip $otherAudioList "Audio tracks players can switch to from Audio in the movie window,`nlike another language or a commentary. Check as many as you want, none is fine.`nThe one the movie already plays isn't in the list. It switches over within a few seconds"
+Set-Tip $burnRadio "Drawn right into the movie. Everybody sees them and they can't be turned off, so only one"
+Set-Tip $captionTracksRadio "Players pick one from Captions in the movie window, or leave them off.`nEach takes roughly half the movie's length to make"
+Set-Tip $subtitlesFromBox "The subtitles to burn in, the movie's own tracks or a subtitle file named like it.`nAny language works. Picture subtitles (Blu-ray, DVD) don't work, Subtitle Edit's OCR can turn them into an srt"
+Set-Tip $captionsList "Check every caption track you want, each one is its own choice in game.`nAny language works. Picture subtitles (Blu-ray, DVD) won't check, Subtitle Edit's OCR can turn them into an srt"
+Set-Tip $subtitlesBrowse "Add a subtitle file from somewhere else, or another video with subtitles in it"
+Set-Tip $outputBox "Where the JimsMovies_ add-on folder gets made"
+Set-Tip $makeButton "Makes the add-on in its own window. Bink takes a while, close that window when it's done"
 
 Update-Trailer
-Set-CaptionChoices @()
-Update-CaptionsRow
+Update-SubtitleLists @() $null
+Update-OtherAudioTracks
 [void]$form.ShowDialog()
 $form.Dispose()

@@ -21,13 +21,25 @@
     -SmallAudio  mono at 22050, about a quarter of the memory. the game decodes the whole ogg into memory
                  when it plays, so a 2 hour stereo movie is ~2.6 GB of RAM and a long freeze at Start Movie
     -AudioTrack  which audio track to use when the movie has more than one, 1 is the first. ffmpeg picks if it's left off
+    -ExtraAudioTrack  another audio track players can switch to in the movie window, another language say.
+                 Make-JimsAudio.ps1 does the work once the movie's done
+    -ExtraAudioLanguage  game language code for that track, EN, ES, JP and so on. defaults to the track's language
+    -AllAudio    every other audio track with a language becomes one players can switch to, instead of -ExtraAudioTrack
+    -AudioTracks  the audio tracks players can switch to, "2,3,5". same language ones each get their own entry
     -AudioGain   makes the audio louder in dB, 18 say, negative turns it down. for quiet sources, 0 by default
     -TrailerAudioGain  the same thing for the trailer -Ask picks up
     -TrailerFile  a trailer video to make along with the movie, without -Ask finding it
-    -Captions    subtitles to make captions from once the movie's done, an .srt or the like, or a video with subtitle tracks.
-                 it can be the movie itself. Make-JimsCaptions.ps1 does the work
-    -CaptionTrack     which subtitle track, when there's more than one. 1 is the first
-    -CaptionLanguage  game language code for the captions, EN, ES and so on. defaults to the track's language or EN
+    -BurnSubtitles  subtitles to burn right into the picture, an .srt or the like, or a video with subtitle tracks.
+                 it can be the movie itself. any language works, but they can't be turned off in game
+    -BurnTrack   which subtitle track to burn in, when there's more than one. 1 is the first
+    -BurnFont    font for burned in subtitles, "Yu Gothic" or "Microsoft YaHei" say. .ass files keep their own unless you pass this
+    -Captions    subtitles to make caption tracks from, same kinds of files as -BurnSubtitles. players pick them from the
+                 movie window and they can be turned off. Make-JimsCaptions.ps1 does the work once the movie's done
+    -CaptionTrack     which subtitle track to make captions from, when there's more than one. 1 is the first
+    -CaptionLanguage  game language code for those captions, EN, ES, RU and so on. defaults to the track's language or EN
+    -AllCaptions  caption tracks for every language in the -Captions file instead of one -CaptionTrack
+    -CaptionPicks  caption tracks from one file or more, track*file joined by |, like "1*D:\a.mkv|2*D:\a.mkv|1*D:\a.srt".
+                 the window passes this
     -AudioChunkSeconds  how long each audio chunk is, 10 by default. 0 makes one ogg for the whole movie
     -AudioChunkOverlap  seconds each audio chunk runs past its end so the mod can crossfade to the next, 0.3 by default
     -VideoChunkSeconds  cuts the bink into chunks this long so late comers can join at the next one, 60 by default.
@@ -51,12 +63,21 @@ param(
     [int]$SampleRate = 0,
     [switch]$SmallAudio,
     [int]$AudioTrack = 0,
+    [int]$ExtraAudioTrack = 0,
+    [string]$ExtraAudioLanguage,
+    [switch]$AllAudio,
+    [string]$AudioTracks,
     [double]$AudioGain = 0,
     [double]$TrailerAudioGain = 0,
     [string]$TrailerFile,
+    [string]$BurnSubtitles,
+    [int]$BurnTrack = 0,
+    [string]$BurnFont,
     [string]$Captions,
     [int]$CaptionTrack = 0,
     [string]$CaptionLanguage,
+    [switch]$AllCaptions,
+    [string]$CaptionPicks,
     [double]$AudioChunkSeconds = 10,
     [double]$AudioChunkOverlap = 0.3,
     [int]$VideoChunkSeconds = 60,
@@ -76,6 +97,9 @@ if ($Height % 2) { throw "-Height needs to be an even number" }
 if ($VideoChunkSeconds -lt 0) { throw "-VideoChunkSeconds can't be negative" }
 $FPS = 30
 $VIDEO_CHUNK_EXTRA_FRAMES = 6
+# in 288ths of the picture height, big enough to read on a little screen at an angle
+$BURN_FONT_SIZE = 22
+$BURN_OUTLINE = 2
 
 function Write-Step($text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
 
@@ -150,6 +174,24 @@ function Read-Choice($question, [string[]]$options, [int]$default = 1) {
     }
 }
 
+# "2,3" or "all", nothing picks nothing. only numbers from allowed count
+function Read-Numbers($question, [int[]]$allowed) {
+    while ($true) {
+        $answer = (Read-Host $question).Trim()
+        if (-not $answer) { return @() }
+        if ($answer -match '^(?i)all$') { return $allowed }
+        $numbers = @()
+        $good = $true
+        foreach ($part in ($answer -split '[,\s]+' | Where-Object { $_ })) {
+            $number = 0
+            if (-not [int]::TryParse($part, [ref]$number) -or $allowed -notcontains $number) { $good = $false; break }
+            if ($numbers -notcontains $number) { $numbers += $number }
+        }
+        if ($good) { return $numbers }
+        Write-Host "  Pick from $($allowed -join ', '), like $($allowed[0]),$($allowed[-1]), or all"
+    }
+}
+
 function Read-ExistingPath($question) {
     while ($true) {
         $answer = (Read-Host $question).Trim().Trim('"')
@@ -197,15 +239,22 @@ function Get-AudioTrackLabels($path) {
     }
 }
 
-# Label, Usable and Language for each subtitle track, from Make-JimsCaptions.ps1 so they read the same everywhere
+# Label and Usable for each subtitle track. libass only does text, so blu-ray and dvd picture subtitles are out
 function Get-SubtitleTracks($path) {
-    $count = @(& $Ffprobe -v error -select_streams s -show_entries stream=index -of csv=p=0 $path | Where-Object { $_ }).Count
-    if ($count -eq 0) { return }
-    $json = (& $captionsScript -Subtitles $path -ListTracks -Ffmpeg $Ffmpeg -Ffprobe $Ffprobe) -join ""
-    $json | ConvertFrom-Json | ForEach-Object { $_ }
+    $probe = (& $Ffprobe -v error -select_streams s -show_entries "stream=codec_name:stream_tags=language,title:stream_disposition=forced" -of json $path) -join "`n" | ConvertFrom-Json
+    foreach ($stream in @($probe.streams)) {
+        if (-not $stream) { continue }
+        $usable = $IMAGE_SUBTITLE_CODECS -notcontains $stream.codec_name
+        $parts = @()
+        $parts += if ($stream.tags -and $stream.tags.language) { $stream.tags.language } else { "unknown language" }
+        if ($stream.tags -and $stream.tags.title) { $parts += $stream.tags.title }
+        if ($stream.disposition -and $stream.disposition.forced -eq 1) { $parts += "forced, only the foreign bits" }
+        $parts += if ($usable) { $stream.codec_name } else { "picture subtitles, can't use" }
+        [pscustomobject]@{ Label = $parts -join ", "; Usable = $usable }
+    }
 }
 
-$captionsScript = Join-Path $PSScriptRoot "Make-JimsCaptions.ps1"
+$IMAGE_SUBTITLE_CODECS = @("hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub", "dvb_teletext")
 $SUBTITLE_EXTENSIONS = @(".srt", ".ass", ".ssa", ".vtt")
 
 if (-not $Video) {
@@ -254,8 +303,26 @@ if ($AudioTrack -gt 0 -and -not $Trailer) {
     $audioTrackCount = @(Get-AudioTrackLabels $Video).Count
     if ($AudioTrack -gt $audioTrackCount) { throw "-AudioTrack $AudioTrack but the movie only has $audioTrackCount audio track(s)" }
 }
+$audioScript = Join-Path $PSScriptRoot "Make-JimsAudio.ps1"
+if (($ExtraAudioTrack -gt 0 -or $AllAudio -or $AudioTracks) -and -not $Trailer) {
+    if (-not (Test-Path -LiteralPath $audioScript)) { throw "Make-JimsAudio.ps1 needs to be next to this script for other audio tracks" }
+    $audioTrackCount = @(Get-AudioTrackLabels $Video).Count
+    if ($ExtraAudioTrack -gt $audioTrackCount) { throw "-ExtraAudioTrack $ExtraAudioTrack but the movie only has $audioTrackCount audio track(s)" }
+    # the extra tracks leave out the one the movie plays, so that one has to be known
+    if ($AudioTrack -le 0 -and $audioTrackCount -gt 1 -and -not $Ask) { $AudioTrack = 1 }
+    if ($ExtraAudioTrack -gt 0 -and $ExtraAudioTrack -eq $AudioTrack) { throw "-ExtraAudioTrack is the same track the movie already plays" }
+}
 
 # checked now so a typo doesn't turn up after hours of bink
+$captionsScript = Join-Path $PSScriptRoot "Make-JimsCaptions.ps1"
+if ($CaptionPicks -and -not $Trailer) {
+    if (-not (Test-Path -LiteralPath $captionsScript)) { throw "Make-JimsCaptions.ps1 needs to be next to this script for -CaptionPicks" }
+    foreach ($entry in ($CaptionPicks -split '\|' | Where-Object { $_.Trim() })) {
+        $parts = $entry.Split([char[]]@('*'), 2)
+        if ($parts.Count -ne 2 -or $parts[0].Trim() -notmatch '^\d+$') { throw "-CaptionPicks has $entry, it should be track*file" }
+        if (-not (Test-Path -LiteralPath $parts[1].Trim())) { throw "No subtitles at $($parts[1].Trim())" }
+    }
+}
 $captionTracks = @()
 if ($Captions -and -not $Trailer) {
     if (-not (Test-Path -LiteralPath $captionsScript)) { throw "Make-JimsCaptions.ps1 needs to be next to this script for -Captions" }
@@ -263,13 +330,31 @@ if ($Captions -and -not $Trailer) {
     $Captions = (Resolve-Path -LiteralPath $Captions).Path
     $captionTracks = @(Get-SubtitleTracks $Captions)
     if ($captionTracks.Count -eq 0) { throw "No subtitle tracks in $([System.IO.Path]::GetFileName($Captions))" }
-    if ($CaptionTrack -gt $captionTracks.Count) { throw "-CaptionTrack $CaptionTrack but there's only $($captionTracks.Count) subtitle track(s)" }
-    if ($CaptionTrack -le 0 -and $captionTracks.Count -eq 1) { $CaptionTrack = 1 }
-    if ($CaptionTrack -le 0 -and -not $Ask) {
-        throw "$([System.IO.Path]::GetFileName($Captions)) has $($captionTracks.Count) subtitle tracks, pick one with -CaptionTrack"
+    if (-not $AllCaptions) {
+        if ($CaptionTrack -gt $captionTracks.Count) { throw "-CaptionTrack $CaptionTrack but there's only $($captionTracks.Count) subtitle track(s)" }
+        if ($CaptionTrack -le 0 -and $captionTracks.Count -eq 1) { $CaptionTrack = 1 }
+        if ($CaptionTrack -le 0 -and -not $Ask) {
+            throw "$([System.IO.Path]::GetFileName($Captions)) has $($captionTracks.Count) subtitle tracks, pick one with -CaptionTrack or use -AllCaptions"
+        }
+        if ($CaptionTrack -gt 0 -and -not $captionTracks[$CaptionTrack - 1].Usable) {
+            throw "Subtitle track $CaptionTrack is picture subtitles, not text. Turn it into an srt with Subtitle Edit's OCR first"
+        }
     }
-    if ($CaptionTrack -gt 0 -and -not $captionTracks[$CaptionTrack - 1].Usable) {
-        throw "Subtitle track $CaptionTrack is picture subtitles, not text. Turn it into an srt with Subtitle Edit's OCR first"
+}
+
+$burnTracks = @()
+if ($BurnSubtitles -and -not $Trailer) {
+    if (-not (Test-Path -LiteralPath $BurnSubtitles)) { throw "No subtitles at $BurnSubtitles" }
+    $BurnSubtitles = (Resolve-Path -LiteralPath $BurnSubtitles).Path
+    $burnTracks = @(Get-SubtitleTracks $BurnSubtitles)
+    if ($burnTracks.Count -eq 0) { throw "No subtitle tracks in $([System.IO.Path]::GetFileName($BurnSubtitles))" }
+    if ($BurnTrack -gt $burnTracks.Count) { throw "-BurnTrack $BurnTrack but there's only $($burnTracks.Count) subtitle track(s)" }
+    if ($BurnTrack -le 0 -and $burnTracks.Count -eq 1) { $BurnTrack = 1 }
+    if ($BurnTrack -le 0 -and -not $Ask) {
+        throw "$([System.IO.Path]::GetFileName($BurnSubtitles)) has $($burnTracks.Count) subtitle tracks, pick one with -BurnTrack"
+    }
+    if ($BurnTrack -gt 0 -and -not $burnTracks[$BurnTrack - 1].Usable) {
+        throw "Subtitle track $BurnTrack is picture subtitles, not text. Turn it into an srt with Subtitle Edit's OCR first"
     }
 }
 
@@ -370,7 +455,20 @@ elseif ($Ask) {
 
     if ($movieHasSound -and $AudioTrack -le 0) {
         $audioLabels = @(Get-AudioTrackLabels $Video)
-        if ($audioLabels.Count -gt 1) { $AudioTrack = Read-Choice "Which audio track?" $audioLabels }
+        if ($audioLabels.Count -gt 1) {
+            $AudioTrack = Read-Choice "Which audio track?" $audioLabels
+            if (-not $AudioTracks -and $ExtraAudioTrack -le 0 -and -not $AllAudio -and (Test-Path -LiteralPath $audioScript)) {
+                Write-Host ""
+                Write-Host "Other audio tracks players can switch to?"
+                $others = @()
+                for ($i = 1; $i -le $audioLabels.Count; $i++) {
+                    if ($i -eq $AudioTrack) { continue }
+                    $others += $i
+                    Write-Host "  $i. $($audioLabels[$i - 1])"
+                }
+                $AudioTracks = (Read-Numbers "Track numbers like $($others[0]), several like $($others -join ','), all, or Enter for none" $others) -join ","
+            }
+        }
     }
 
     if ($hasSound -and -not $SmallAudio) {
@@ -388,39 +486,45 @@ elseif ($Ask) {
     if ($movieHasSound -and -not $PSBoundParameters.ContainsKey("AudioGain")) { $AudioGain = Read-Boost "Movie audio boost in dB" }
     if ($trailerHasSound -and -not $PSBoundParameters.ContainsKey("TrailerAudioGain")) { $TrailerAudioGain = Read-Boost "Trailer audio boost in dB" }
 
-    # captions can come from the movie's own subtitle tracks or a subtitle file named like the movie
-    if ($Captions -and $CaptionTrack -le 0) {
-        $CaptionTrack = Read-Choice "Which subtitles for the captions?" @($captionTracks | ForEach-Object { $_.Label })
+    # subtitles can come from the movie's own subtitle tracks or a subtitle file named like the movie
+    if ($BurnSubtitles -and $BurnTrack -le 0) {
+        $BurnTrack = Read-Choice "Which subtitles to burn in?" @($burnTracks | ForEach-Object { $_.Label })
+        if (-not $burnTracks[$BurnTrack - 1].Usable) { throw "That's picture subtitles, not text. Turn it into an srt with Subtitle Edit's OCR first" }
+    }
+    elseif ($Captions -and -not $AllCaptions -and $CaptionTrack -le 0) {
+        $CaptionTrack = Read-Choice "Which subtitles for the caption track?" @($captionTracks | ForEach-Object { $_.Label })
         if (-not $captionTracks[$CaptionTrack - 1].Usable) { throw "That's picture subtitles, not text. Turn it into an srt with Subtitle Edit's OCR first" }
     }
-    elseif (-not $Captions -and (Test-Path -LiteralPath $captionsScript)) {
+    elseif (-not $BurnSubtitles -and -not $Captions -and -not $CaptionPicks) {
         $choices = @()
         foreach ($track in @(Get-SubtitleTracks $Video)) {
-            $choices += [pscustomobject]@{ Path = $Video; Track = $choices.Count + 1; Label = "From the movie: $($track.Label)"; Usable = $track.Usable; Language = $track.Language }
+            $choices += [pscustomobject]@{ Path = $Video; Track = $choices.Count + 1; Label = "From the movie: $($track.Label)"; Usable = $track.Usable }
         }
         foreach ($file in Get-ChildItem -LiteralPath $videoFolder -File -Filter "$videoBase*") {
             if ($SUBTITLE_EXTENSIONS -contains $file.Extension.ToLower()) {
-                $choices += [pscustomobject]@{ Path = $file.FullName; Track = 1; Label = $file.Name; Usable = $true; Language = "EN" }
+                $choices += [pscustomobject]@{ Path = $file.FullName; Track = 1; Label = $file.Name; Usable = $true }
             }
         }
         if ($choices.Count -gt 0) {
-            $picked = (Read-Choice "Captions?" (@("None") + @($choices | ForEach-Object { $_.Label }))) - 1
-            if ($picked -gt 0) {
-                $choice = $choices[$picked - 1]
-                if (-not $choice.Usable) {
-                    Write-Host "  that's picture subtitles, not text, so no captions. Subtitle Edit's OCR can turn them into an srt" -ForegroundColor Yellow
+            $ways = @("None", "Burn one into the video, it can't be turned off", "Caption tracks players can turn on in the movie window")
+            $way = Read-Choice "Subtitles?" $ways 3
+            if ($way -eq 2) {
+                $choice = $choices[(Read-Choice "Which subtitles to burn in?" @($choices | ForEach-Object { $_.Label })) - 1]
+                if ($choice.Usable) { $BurnSubtitles = $choice.Path; $BurnTrack = $choice.Track }
+                else { Write-Host "  that's picture subtitles, not text, so no subtitles. Subtitle Edit's OCR can turn them into an srt" -ForegroundColor Yellow }
+            }
+            elseif ($way -eq 3) {
+                Write-Host ""
+                Write-Host "Which ones?"
+                $usable = @()
+                for ($i = 1; $i -le $choices.Count; $i++) {
+                    $note = if ($choices[$i - 1].Usable) { $usable += $i; "" } else { "  (picture subtitles, can't use)" }
+                    Write-Host "  $i. $($choices[$i - 1].Label)$note"
                 }
-                else {
-                    $Captions = $choice.Path
-                    $CaptionTrack = $choice.Track
-                    if (-not $CaptionLanguage) { $CaptionLanguage = $choice.Language }
-                }
+                $numbers = @(Read-Numbers "Numbers like 1,2, all, or Enter for none" $usable)
+                if ($numbers.Count -gt 0) { $CaptionPicks = (@($numbers | ForEach-Object { "$($choices[$_ - 1].Track)*$($choices[$_ - 1].Path)" })) -join "|" }
             }
         }
-    }
-    if ($Captions -and -not $PSBoundParameters.ContainsKey("CaptionLanguage")) {
-        if (-not $CaptionLanguage -and $CaptionTrack -gt 0 -and $captionTracks.Count -ge $CaptionTrack) { $CaptionLanguage = $captionTracks[$CaptionTrack - 1].Language }
-        $CaptionLanguage = (Read-Answer "Game language code for the captions" $(if ($CaptionLanguage) { $CaptionLanguage } else { "EN" })).ToUpper()
     }
 
     $existing = Join-Path $ModsDir "JimsMovies_$Id"
@@ -471,11 +575,35 @@ if (-not $Trailer -and (Test-Path -LiteralPath $modDir)) { Write-Host "  that fo
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ("jimsmovies_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
+    $burnFilter = ""
+    if ($BurnSubtitles -and -not $Trailer) {
+        Write-Step "Subtitles to burn in"
+        # ffmpeg's filter options choke on windows paths, so they go into the work folder as burn.ass and get used by name
+        $burnArguments = @("-i", $BurnSubtitles, "-map", "0:s:$($BurnTrack - 1)", "-c:s", "ass", (Join-Path $work "burn.ass"))
+        # old subtitle files that aren't utf8 fail, those are nearly always CP1252
+        try { Invoke-FfmpegQuiet $burnArguments }
+        catch {
+            Write-Host "  not utf8, trying CP1252" -ForegroundColor Yellow
+            Invoke-FfmpegQuiet (@("-sub_charenc", "CP1252") + $burnArguments)
+        }
+        $burnCodec = (& $Ffprobe -v error -select_streams "s:$($BurnTrack - 1)" -show_entries stream=codec_name -of csv=p=0 $BurnSubtitles | Select-Object -First 1)
+        $styles = @()
+        if ($BurnFont) { $styles += "FontName=$($BurnFont -replace "[',]", '')" }
+        # plain subtitles come out tiny and thin on a low res screen, .ass ones were styled on purpose so they're left alone
+        if ($burnCodec -notin @("ass", "ssa")) { $styles += @("FontSize=$BURN_FONT_SIZE", "Outline=$BURN_OUTLINE", "Shadow=0") }
+        $burnFilter = ",subtitles=burn.ass"
+        if ($styles.Count -gt 0) { $burnFilter += ":force_style='$($styles -join ',')'" }
+        Write-Host "  track $BurnTrack of $([System.IO.Path]::GetFileName($BurnSubtitles)) ($burnCodec)"
+    }
+
     Write-Step "Video: ${Width}x$Height at $FPS fps"
     $silent = Join-Path $work "video.mp4"
-    $filter = "fps=$FPS,scale=${Width}:${Height}:force_original_aspect_ratio=decrease,pad=${Width}:${Height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p"
+    # subtitles go on after the pad so they're sized to the finished picture and can sit down in the black bars
+    $filter = "fps=$FPS,scale=${Width}:${Height}:force_original_aspect_ratio=decrease,pad=${Width}:${Height}:(ow-iw)/2:(oh-ih)/2,setsar=1$burnFilter,format=yuv420p"
     # chapters would come along as a data track and rad goes by the longest track
-    Invoke-Ffmpeg @("-i", $Video, "-an", "-sn", "-dn", "-map_chapters", "-1", "-vf", $filter, "-c:v", "libx264", "-crf", "16", "-preset", "fast", $silent)
+    Push-Location -LiteralPath $work
+    try { Invoke-Ffmpeg @("-i", $Video, "-an", "-sn", "-dn", "-map_chapters", "-1", "-vf", $filter, "-c:v", "libx264", "-crf", "16", "-preset", "fast", $silent) }
+    finally { Pop-Location }
 
     Write-Step "Bink: compressing (this will take ages)"
     $videoDir = Split-Path -Parent $bk2
@@ -680,22 +808,61 @@ if ($trailerVideo) {
     & $PSCommandPath @trailerSettings
 }
 
-if ($Captions -and -not $Trailer) {
-    Write-Step "Captions"
+if (($ExtraAudioTrack -gt 0 -or $AllAudio -or $AudioTracks) -and -not $Trailer) {
+    Write-Step "Other audio tracks"
+    $audioSettings = @{
+        Source = $Video
+        Id = $Id
+        ModsDir = $ModsDir
+        AudioGain = $AudioGain
+        AudioQuality = $AudioQuality
+        Ffmpeg = $Ffmpeg
+        Ffprobe = $Ffprobe
+        Replace = $true
+    }
+    if ($AudioTracks) {
+        $audioSettings.Tracks = $AudioTracks
+        if ($AudioTrack -gt 0) { $audioSettings.SkipTrack = $AudioTrack }
+    }
+    elseif ($AllAudio) {
+        $audioSettings.AllTracks = $true
+        if ($AudioTrack -gt 0) { $audioSettings.SkipTrack = $AudioTrack }
+    }
+    else {
+        $audioSettings.Track = $ExtraAudioTrack
+        if ($ExtraAudioLanguage) { $audioSettings.Language = $ExtraAudioLanguage }
+    }
+    # a bad track shouldn't make it look like the whole movie failed
+    try { & $audioScript @audioSettings }
+    catch {
+        Write-Host "  Other audio tracks didn't work: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  The movie's fine, you can add them later with Make-JimsAudio.ps1" -ForegroundColor Yellow
+    }
+}
+
+if (($Captions -or $CaptionPicks) -and -not $Trailer) {
+    Write-Step "Caption tracks"
     $captionSettings = @{
-        Subtitles = $Captions
         Id = $Id
         ModsDir = $ModsDir
         Ffmpeg = $Ffmpeg
         Ffprobe = $Ffprobe
+        Rad = $Rad
+        Replace = $true
     }
-    if ($CaptionTrack -gt 0) { $captionSettings.Track = $CaptionTrack }
-    if ($CaptionLanguage) { $captionSettings.Language = $CaptionLanguage }
-    # a bad subtitle file shouldn't make it look like the whole movie failed
+    if ($CaptionPicks) { $captionSettings.Picks = $CaptionPicks }
+    elseif ($AllCaptions) { $captionSettings.Subtitles = $Captions; $captionSettings.AllTracks = $true }
+    else {
+        $captionSettings.Subtitles = $Captions
+        $captionSettings.Track = $CaptionTrack
+        if ($CaptionLanguage) { $captionSettings.Language = $CaptionLanguage }
+    }
+    if ($BurnFont) { $captionSettings.Font = $BurnFont }
+    # bad subtitles shouldn't make it look like the whole movie failed
     try { & $captionsScript @captionSettings }
     catch {
         Write-Host "  Captions didn't work: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "  The movie's fine, you can add captions later with Make-JimsCaptions.bat" -ForegroundColor Yellow
+        Write-Host "  The movie's fine, you can add captions later with Make-JimsCaptions.ps1" -ForegroundColor Yellow
     }
 }
 
